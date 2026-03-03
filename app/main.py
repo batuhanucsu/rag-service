@@ -10,6 +10,7 @@ from app.services.chunker import TextChunker
 from app.services.embedding_service import EmbeddingService
 from app.services.ingestion_service import IngestionService
 from app.services.llm_service import LLMService
+from app.services.reranker_service import RerankService
 from app.services.retrieval_service import RetrievalService
 from app.services.semantic_cache import SemanticCache
 from app.services.vector_store import VectorStore
@@ -37,12 +38,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         chunker=chunker,
     )
     llm_service = LLMService()
+    reranker = RerankService()
     semantic_cache = SemanticCache()
 
     retrieval_service = RetrievalService(
         embedding_service=embedding_service,
         vector_store=vector_store,
         llm_service=llm_service,
+        reranker=reranker,
         semantic_cache=semantic_cache,
     )
     yield
