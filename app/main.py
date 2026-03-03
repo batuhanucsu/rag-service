@@ -11,6 +11,7 @@ from app.services.embedding_service import EmbeddingService
 from app.services.ingestion_service import IngestionService
 from app.services.llm_service import LLMService
 from app.services.retrieval_service import RetrievalService
+from app.services.semantic_cache import SemanticCache
 from app.services.vector_store import VectorStore
 
 # ------------------------------------------------------------------
@@ -18,12 +19,13 @@ from app.services.vector_store import VectorStore
 # ------------------------------------------------------------------
 ingestion_service: IngestionService
 retrieval_service: RetrievalService
+semantic_cache: SemanticCache
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialise heavyweight services once when the app starts."""
-    global ingestion_service, retrieval_service  # noqa: PLW0603
+    global ingestion_service, retrieval_service, semantic_cache  # noqa: PLW0603
 
     embedding_service = EmbeddingService()
     vector_store = VectorStore()
@@ -35,11 +37,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         chunker=chunker,
     )
     llm_service = LLMService()
+    semantic_cache = SemanticCache()
 
     retrieval_service = RetrievalService(
         embedding_service=embedding_service,
         vector_store=vector_store,
         llm_service=llm_service,
+        semantic_cache=semantic_cache,
     )
     yield
 
@@ -83,6 +87,18 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     answer: str = Field(..., description="LLM-generated natural-language answer.")
     sources: list[str] = Field(..., description="Source chunks used to generate the answer.")
+    cached: bool = Field(False, description="True if the answer was served from semantic cache.")
+
+
+class CacheStatsResponse(BaseModel):
+    size: int = Field(..., description="Current number of cached entries.")
+    max_size: int = Field(..., description="Maximum cache capacity.")
+    similarity_threshold: float = Field(..., description="Cosine similarity threshold for cache hits.")
+    ttl_seconds: float = Field(..., description="Time-to-live per entry in seconds.")
+
+
+class CacheClearResponse(BaseModel):
+    cleared: int = Field(..., description="Number of entries removed.")
 
 
 # ------------------------------------------------------------------
@@ -125,8 +141,29 @@ async def search(request: SearchRequest) -> SearchResponse:
     description="Retrieve relevant chunks and generate a natural-language answer using LLM.",
 )
 async def ask(request: AskRequest) -> AskResponse:
-    answer, sources = retrieval_service.ask(
+    answer, sources, cached = retrieval_service.ask(
         query=request.query,
         top_k=request.top_k,
     )
-    return AskResponse(answer=answer, sources=sources)
+    return AskResponse(answer=answer, sources=sources, cached=cached)
+
+
+@app.get(
+    "/cache/stats",
+    response_model=CacheStatsResponse,
+    summary="Cache statistics",
+    description="Return current semantic cache size and configuration.",
+)
+async def cache_stats() -> CacheStatsResponse:
+    return CacheStatsResponse(**semantic_cache.stats)
+
+
+@app.delete(
+    "/cache",
+    response_model=CacheClearResponse,
+    summary="Clear cache",
+    description="Remove all entries from the semantic cache.",
+)
+async def cache_clear() -> CacheClearResponse:
+    cleared = semantic_cache.clear()
+    return CacheClearResponse(cleared=cleared)

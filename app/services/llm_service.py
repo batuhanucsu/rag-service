@@ -65,18 +65,28 @@ class LLMService:
 
     def _call_ollama(self, prompt: str) -> str:
         """Send a prompt to the Ollama generate API and return the response."""
-        with httpx.Client(timeout=self._timeout) as client:
-            response = client.post(
-                f"{self._base_url}/api/generate",
-                json={
-                    "model": self._model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": 512,
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.post(
+                    f"{self._base_url}/api/generate",
+                    json={
+                        "model": self._model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.3,
+                            "num_predict": 512,
+                        },
                     },
-                },
+                )
+                response.raise_for_status()
+                return response.json().get("response", "").strip()
+        except httpx.ConnectError:
+            return (
+                f"LLM servisine bağlanılamadı. Lütfen Ollama'nın çalıştığından emin olun "
+                f"({self._base_url}). Kurulum: https://ollama.com"
             )
-            response.raise_for_status()
-            return response.json().get("response", "").strip()
+        except httpx.TimeoutException:
+            return "LLM servisi zaman aşımına uğradı. Lütfen tekrar deneyin."
+        except httpx.HTTPStatusError as e:
+            return f"LLM servisi hata döndürdü: HTTP {e.response.status_code}"
